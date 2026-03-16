@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Flight Operations Tracker</title>
+  <style>
+    /* Simple, clean layout — no frameworks needed */
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      max-width: 700px;
+      margin: 40px auto;
+      padding: 0 20px;
+      color: #222;
+      background: #fafafa;
+    }
+
+    h1 {
+      text-align: center;
+      margin-bottom: 8px;
+      font-size: 1.6rem;
+    }
+
+    .subtitle {
+      text-align: center;
+      color: #666;
+      margin-bottom: 32px;
+      font-size: 0.95rem;
+    }
+
+    /* Search form */
+    .search-form {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 24px;
+    }
+
+    .search-form input {
+      flex: 1;
+      padding: 10px 14px;
+      font-size: 1rem;
+      border: 1px solid #ccc;
+      border-radius: 6px;
+    }
+
+    .search-form button {
+      padding: 10px 20px;
+      font-size: 1rem;
+      background: #0057b7;
+      color: white;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+
+    .search-form button:hover { background: #004494; }
+
+    /* Results table */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 16px;
+    }
+
+    th, td {
+      text-align: left;
+      padding: 10px 12px;
+      border-bottom: 1px solid #e0e0e0;
+    }
+
+    th {
+      background: #f0f0f0;
+      font-weight: 600;
+      width: 45%;
+    }
+
+    /* Status / error messages */
+    .message {
+      padding: 12px;
+      border-radius: 6px;
+      margin-top: 16px;
+    }
+
+    .message.error {
+      background: #fdecea;
+      color: #b71c1c;
+    }
+
+    .message.loading {
+      background: #e3f2fd;
+      color: #0d47a1;
+    }
+
+    .delay-positive { color: #c62828; font-weight: 600; }
+    .delay-zero     { color: #2e7d32; font-weight: 600; }
+  </style>
+</head>
+<body>
+
+  <h1>Flight Operations Tracker</h1>
+  <p class="subtitle">Enter a flight number to view operational details and delay information.</p>
+
+  <!-- Search form: user types a flight identifier like AAL100 or DL245 -->
+  <div class="search-form">
+    <input type="text" id="flightInput" placeholder="e.g. AAL100, DL245, UAL354" />
+    <button id="searchBtn">Search</button>
+  </div>
+
+  <!-- Results will be injected here by JavaScript -->
+  <div id="results"></div>
+
+  <script>
+    /**
+     * ==========================================================
+     *  HOW THE FRONTEND CALLS THE BACKEND
+     * ==========================================================
+     *  1. The user types a flight number and clicks "Search".
+     *  2. JavaScript sends a GET request to /api/flight?ident=FLIGHTNUMBER
+     *     — This is OUR backend, not the AeroAPI directly.
+     *  3. The backend calls the AeroAPI (with the secret key) and
+     *     returns the JSON result to us.
+     *  4. We parse and display the data in a table.
+     *
+     *  The frontend NEVER contacts FlightAware directly and
+     *  NEVER sees the API key. This is the secure pattern for
+     *  calling third-party APIs from a web application.
+     * ==========================================================
+     */
+
+    const input = document.getElementById("flightInput");
+    const btn   = document.getElementById("searchBtn");
+    const resultsDiv = document.getElementById("results");
+
+    // Allow pressing Enter to search
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") searchFlight();
+    });
+    btn.addEventListener("click", searchFlight);
+
+    async function searchFlight() {
+      const ident = input.value.trim();
+      if (!ident) return;
+
+      // Show loading state
+      resultsDiv.innerHTML = '<div class="message loading">Searching…</div>';
+
+      try {
+        // --- This is the call to OUR backend API route ---
+        const res = await fetch("/api/flight?ident=" + encodeURIComponent(ident));
+        const data = await res.json();
+
+        if (!res.ok) {
+          resultsDiv.innerHTML =
+            '<div class="message error">Error: ' + escapeHtml(data.error || "Unknown error") + "</div>";
+          return;
+        }
+
+        // The AeroAPI returns an array of flights in data.flights
+        if (!data.flights || data.flights.length === 0) {
+          resultsDiv.innerHTML =
+            '<div class="message error">No flights found for ' + escapeHtml(ident) + ".</div>";
+          return;
+        }
+
+        // Show the most recent flight (last element in the array)
+        const flight = data.flights[data.flights.length - 1];
+        displayFlight(flight);
+      } catch (err) {
+        resultsDiv.innerHTML =
+          '<div class="message error">Network error: ' + escapeHtml(err.message) + "</div>";
+      }
+    }
+
+    /**
+     * Display a single flight record in a table.
+     */
+    function displayFlight(f) {
+      // -------------------------------------------------------
+      //  COMPUTING DELAYS
+      //  We subtract the scheduled timestamp from the actual
+      //  timestamp to find how many minutes late the flight was.
+      //  A positive number means a delay; zero or negative means
+      //  the flight was on time or early.
+      // -------------------------------------------------------
+      const depDelay = computeDelayMinutes(f.scheduled_out, f.actual_out);
+      const arrDelay = computeDelayMinutes(f.scheduled_in, f.actual_in);
+
+      const rows = [
+        ["Airline / Flight", f.ident || "—"],
+        ["Origin", formatAirport(f.origin)],
+        ["Destination", formatAirport(f.destination)],
+        ["Status", f.status || "—"],
+        ["Scheduled departure", formatTime(f.scheduled_out)],
+        ["Actual departure", formatTime(f.actual_out)],
+        ["Departure delay", formatDelay(depDelay)],
+        ["Scheduled arrival", formatTime(f.scheduled_in)],
+        ["Actual arrival", formatTime(f.actual_in)],
+        ["Arrival delay", formatDelay(arrDelay)],
+        ["Inbound flight", f.inbound_fa_flight_id
+            ? escapeHtml(f.inbound_fa_flight_id)
+            : '<span style="color:#999">None / not available</span>'],
+      ];
+
+      let html = "<table><tbody>";
+      for (const [label, value] of rows) {
+        html += "<tr><th>" + escapeHtml(label) + "</th><td>" + value + "</td></tr>";
+      }
+      html += "</tbody></table>";
+
+      resultsDiv.innerHTML = html;
+    }
+
+    // --- Helper functions ---
+
+    /**
+     * Compute delay in minutes between two ISO-8601 timestamps.
+     * Returns null if either timestamp is missing.
+     */
+    function computeDelayMinutes(scheduled, actual) {
+      if (!scheduled || !actual) return null;
+      const diff = new Date(actual) - new Date(scheduled); // milliseconds
+      return Math.round(diff / 60000); // convert to minutes
+    }
+
+    /**
+     * Format a delay value for display, with color coding.
+     */
+    function formatDelay(minutes) {
+      if (minutes === null) return "—";
+      if (minutes <= 0) {
+        return '<span class="delay-zero">' + minutes + " min (on time)</span>";
+      }
+      return '<span class="delay-positive">+' + minutes + " min</span>";
+    }
+
+    /**
+     * Format an ISO-8601 timestamp into a readable string.
+     */
+    function formatTime(iso) {
+      if (!iso) return "—";
+      const d = new Date(iso);
+      return escapeHtml(d.toLocaleString());
+    }
+
+    /**
+     * Format airport info from the AeroAPI airport object.
+     */
+    function formatAirport(airport) {
+      if (!airport) return "—";
+      const name = airport.name || "";
+      const code = airport.code_iata || airport.code || "";
+      return escapeHtml(code + (name ? " — " + name : ""));
+    }
+
+    /**
+     * Basic HTML escaping to prevent XSS.
+     */
+    function escapeHtml(str) {
+      const div = document.createElement("div");
+      div.textContent = String(str);
+      return div.innerHTML;
+    }
+  </script>
+
+</body>
+</html>
