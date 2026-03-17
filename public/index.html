@@ -377,7 +377,7 @@
 
     async function pollEvents() {
       try {
-        let url = "/api/events";
+        let url = "/api/sms";
         if (lastEventTime) url += "?since=" + encodeURIComponent(lastEventTime);
         const res = await fetch(url);
         const data = await res.json();

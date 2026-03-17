@@ -72,10 +72,10 @@ function storeEvent(event) {
 }
 
 module.exports = async function handler(req, res) {
-  console.log("[sms] method:", req.method);
-  console.log("[sms] content-type:", req.headers["content-type"]);
-  console.log("[sms] req.body type:", typeof req.body);
-  console.log("[sms] req.body:", JSON.stringify(req.body));
+  // GET = return stored events for the frontend live feed
+  if (req.method === "GET") {
+    return handleGetEvents(req, res);
+  }
 
   // Twilio sends webhooks as POST requests
   if (req.method !== "POST") {
@@ -85,11 +85,9 @@ module.exports = async function handler(req, res) {
 
   // Parse the form-encoded body that Twilio sends
   const fields = await parseBody(req);
-  console.log("[sms] parsed fields:", JSON.stringify(fields));
   const body = (fields.Body || "").trim();
   // "From" contains the sender's phone number, e.g. "+15551234567"
   const from = (fields.From || "").trim();
-  console.log("[sms] body:", body, "from:", from);
 
   if (!body) {
     return res
@@ -322,4 +320,29 @@ function twiml(message) {
     "  <Message>" + escapeXml(message) + "</Message>",
     "</Response>",
   ].join("\n");
+}
+
+/**
+ * Handle GET requests — return stored events for the frontend live feed.
+ * This lives in the same serverless function as the POST handler so both
+ * share the same /tmp filesystem on Vercel.
+ */
+function handleGetEvents(req, res) {
+  const since = req.query.since || null;
+
+  let events = [];
+  try {
+    const raw = fs.readFileSync(EVENTS_FILE, "utf-8");
+    events = JSON.parse(raw);
+  } catch {
+    // File doesn't exist yet — no events
+  }
+
+  if (since) {
+    const sinceMs = new Date(since).getTime();
+    events = events.filter((e) => new Date(e.timestamp).getTime() > sinceMs);
+  }
+
+  res.setHeader("Cache-Control", "no-cache");
+  return res.status(200).json({ events });
 }
