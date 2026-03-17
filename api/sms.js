@@ -1,19 +1,25 @@
 /**
  * Serverless API route: POST /api/sms
  *
- * TWILIO SMS WEBHOOK
- * This endpoint receives incoming text messages from Twilio. When a user
- * texts a flight code (e.g. "AAL100") to your Twilio number, this function:
- *   1. Parses the flight code from the SMS body
+ * TWILIO WHATSAPP SANDBOX WEBHOOK
+ * This endpoint receives incoming WhatsApp messages via the Twilio Sandbox.
+ * When a user sends a flight code (e.g. "AAL100") to the sandbox number,
+ * this function:
+ *   1. Parses the flight code from the message body
  *   2. Looks up the flight via FlightAware AeroAPI
- *   3. Formats the flight details as a plain-text SMS
- *   4. Returns TwiML XML so Twilio sends the reply back to the user
+ *   3. Formats the flight details as a plain-text reply
+ *   4. Returns TwiML XML so Twilio sends the reply back via WhatsApp
  *
- * TWILIO SETUP:
- * 1. Go to your Twilio Console → Phone Numbers → (229) 597-2468
- * 2. Under "Messaging", set the webhook for "A message comes in" to:
+ * TWILIO WHATSAPP SANDBOX SETUP:
+ * 1. Go to Twilio Console → Messaging → Try it out → Send a WhatsApp message
+ * 2. Follow the instructions to join your sandbox (send "join <your-keyword>"
+ *    to the sandbox number, typically +1 (415) 523-8886)
+ * 3. Under "Sandbox settings", set "WHEN A MESSAGE COMES IN" webhook to:
  *      https://your-vercel-domain.vercel.app/api/sms   (HTTP POST)
- * 3. Save. Now incoming texts will hit this endpoint.
+ * 4. Save. Now WhatsApp messages to the sandbox will hit this endpoint.
+ *
+ * NOTE: The WhatsApp Sandbox does NOT require A2P 10DLC campaign registration
+ * or phone number verification, making it ideal for development and demos.
  *
  * ENVIRONMENT VARIABLES NEEDED:
  * - FLIGHTAWARE_API_KEY (same one used by /api/flight)
@@ -33,7 +39,7 @@ module.exports = async function handler(req, res) {
     return res
       .status(200)
       .setHeader("Content-Type", "text/xml")
-      .send(twiml("Please text a flight code (e.g. AAL100, DL245, UAL354) to look up flight details."));
+      .send(twiml("Send a flight code (e.g. AAL100, DL245, UAL354) to look up flight details."));
   }
 
   // Use the first word as the flight identifier (ignore anything extra)
@@ -140,7 +146,7 @@ function fmtDelay(minutes) {
 }
 
 /**
- * Wrap a message string in TwiML XML so Twilio sends it as an SMS reply.
+ * Wrap a message string in TwiML XML so Twilio sends it as a WhatsApp reply.
  * We build the XML by hand to avoid needing any dependencies.
  */
 function twiml(message) {
