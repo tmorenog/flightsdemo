@@ -31,15 +31,20 @@ const MAX_EVENTS = 50;
 
 /**
  * Read and parse the raw request body.
- * Vercel serverless functions do not auto-parse application/x-www-form-urlencoded,
- * so we must collect the stream manually.
+ * Vercel may or may not auto-parse the body depending on the runtime.
+ * We handle every case: pre-parsed object, raw string, or stream.
  */
 function parseBody(req) {
   return new Promise((resolve, reject) => {
-    // If Vercel already parsed it (some runtimes do), use it directly
-    if (req.body && typeof req.body === "object" && Object.keys(req.body).length > 0) {
+    // Case 1: Vercel already parsed it into an object
+    if (req.body && typeof req.body === "object") {
       return resolve(req.body);
     }
+    // Case 2: Vercel read it but left it as a raw string
+    if (req.body && typeof req.body === "string") {
+      return resolve(querystring.parse(req.body));
+    }
+    // Case 3: Body not yet consumed — read from stream
     let raw = "";
     req.on("data", (chunk) => { raw += chunk; });
     req.on("end", () => {
@@ -67,6 +72,11 @@ function storeEvent(event) {
 }
 
 module.exports = async function handler(req, res) {
+  console.log("[sms] method:", req.method);
+  console.log("[sms] content-type:", req.headers["content-type"]);
+  console.log("[sms] req.body type:", typeof req.body);
+  console.log("[sms] req.body:", JSON.stringify(req.body));
+
   // Twilio sends webhooks as POST requests
   if (req.method !== "POST") {
     res.setHeader("Content-Type", "text/xml");
@@ -75,9 +85,11 @@ module.exports = async function handler(req, res) {
 
   // Parse the form-encoded body that Twilio sends
   const fields = await parseBody(req);
+  console.log("[sms] parsed fields:", JSON.stringify(fields));
   const body = (fields.Body || "").trim();
   // "From" contains the sender's phone number, e.g. "+15551234567"
   const from = (fields.From || "").trim();
+  console.log("[sms] body:", body, "from:", from);
 
   if (!body) {
     return res
