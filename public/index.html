@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Flight Operations Tracker</title>
+  <title>Demo for Digital Operations</title>
   <style>
     /* Simple, clean layout — no frameworks needed */
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -194,48 +194,11 @@
       color: #666;
     }
 
-    /* Hotels at Destination section */
-    .hotels-section {
-      margin-top: 28px;
-      padding-top: 20px;
-      border-top: 1px solid #e0e0e0;
-    }
-
-    .hotels-section h2 {
-      font-size: 1.1rem;
-      margin-bottom: 12px;
-    }
-
-    .hotels-table {
-      width: 100%;
-      border-collapse: collapse;
-    }
-
-    .hotels-table th {
-      background: #f0f0f0;
-      font-weight: 600;
-      text-align: left;
-      padding: 8px 12px;
-      border-bottom: 2px solid #ddd;
-      width: auto;
-    }
-
-    .hotels-table td {
-      padding: 8px 12px;
-      border-bottom: 1px solid #e0e0e0;
-    }
-
-    .hotels-message {
-      color: #999;
-      font-size: 0.9rem;
-      font-style: italic;
-      margin-top: 8px;
-    }
   </style>
 </head>
 <body>
 
-  <h1>Flight Operations Tracker</h1>
+  <h1>Demo for Digital Operations</h1>
   <p class="subtitle">Enter a flight number to view operational details and delay information.</p>
   <p class="subtitle" style="margin-top:-20px; font-size:0.88rem;">Text a flight code to <strong>(229) 597-2468</strong> to get details via SMS and a voice call.</p>
 
@@ -247,9 +210,6 @@
 
   <!-- Results will be injected here by JavaScript -->
   <div id="results"></div>
-
-  <!-- Hotels at Destination: shown after a flight search completes -->
-  <div id="hotelsSection"></div>
 
   <!-- Live SMS feed -->
   <div class="live-feed">
@@ -278,8 +238,6 @@
     const input = document.getElementById("flightInput");
     const btn   = document.getElementById("searchBtn");
     const resultsDiv = document.getElementById("results");
-    const hotelsDiv  = document.getElementById("hotelsSection");
-
     // Allow pressing Enter to search
     input.addEventListener("keydown", (e) => {
       if (e.key === "Enter") searchFlight();
@@ -290,9 +248,8 @@
       const ident = input.value.trim();
       if (!ident) return;
 
-      // Show loading state and clear previous hotel results
+      // Show loading state
       resultsDiv.innerHTML = '<div class="message loading">Searching…</div>';
-      hotelsDiv.innerHTML = "";
 
       try {
         // --- This is the call to OUR backend API route ---
@@ -315,12 +272,6 @@
         // Show the most recent flight (last element in the array)
         const flight = data.flights[data.flights.length - 1];
         displayFlight(flight);
-
-        // --- HOTEL SEARCH ---
-        // After displaying flight details, automatically look up hotels
-        // at the destination city. We extract the city name from the
-        // destination airport object returned by the AeroAPI.
-        searchHotels(flight);
       } catch (err) {
         resultsDiv.innerHTML =
           '<div class="message error">Network error: ' + escapeHtml(err.message) + "</div>";
@@ -415,123 +366,6 @@
       const div = document.createElement("div");
       div.textContent = String(str);
       return div.innerHTML;
-    }
-
-    // =============================================
-    //  HOTEL SEARCH
-    //  After a flight search, we extract the destination city from the
-    //  AeroAPI response and call /api/hotels?city=CITYNAME. The backend
-    //  proxies the request to the MakCorps API (keeping the key secret)
-    //  and returns simplified hotel data.
-    // =============================================
-
-    /**
-     * Extract a usable city name from the AeroAPI destination object.
-     * AeroAPI airport names often look like "Los Angeles International"
-     * or "Hartsfield-Jackson Atlanta International". We try the city
-     * field first, then fall back to stripping common suffixes from
-     * the airport name.
-     */
-    function extractCityName(destination) {
-      if (!destination) return null;
-
-      // AeroAPI sometimes provides a "city" field directly
-      if (destination.city) return destination.city;
-
-      // Fall back to the airport name, stripping common suffixes
-      const name = destination.name || "";
-      if (!name) return null;
-
-      // Remove common airport name suffixes to get a city-like name
-      return name
-        .replace(/\s*(International|Intl|Regional|Municipal|Metropolitan|Airport|Airpark|Field)\s*/gi, " ")
-        .replace(/\s+/g, " ")
-        .trim();
-    }
-
-    /**
-     * Fetch hotel prices for the destination city and display them.
-     */
-    async function searchHotels(flight) {
-      const city = extractCityName(flight.destination);
-
-      if (!city) {
-        hotelsDiv.innerHTML =
-          '<div class="hotels-section">' +
-            '<h2>Hotels at Destination</h2>' +
-            '<p class="hotels-message">Could not determine destination city for hotel search.</p>' +
-          '</div>';
-        return;
-      }
-
-      // Show loading state while we fetch hotel data
-      hotelsDiv.innerHTML =
-        '<div class="hotels-section">' +
-          '<h2>Hotels at Destination</h2>' +
-          '<div class="message loading">Searching hotels in ' + escapeHtml(city) + '…</div>' +
-        '</div>';
-
-      try {
-        const res = await fetch("/api/hotels?city=" + encodeURIComponent(city));
-        const data = await res.json();
-
-        if (!res.ok) {
-          hotelsDiv.innerHTML =
-            '<div class="hotels-section">' +
-              '<h2>Hotels at Destination</h2>' +
-              '<p class="hotels-message">No hotel pricing found for this destination.</p>' +
-            '</div>';
-          return;
-        }
-
-        displayHotels(data);
-      } catch {
-        hotelsDiv.innerHTML =
-          '<div class="hotels-section">' +
-            '<h2>Hotels at Destination</h2>' +
-            '<p class="hotels-message">No hotel pricing found for this destination.</p>' +
-          '</div>';
-      }
-    }
-
-    /**
-     * Render hotel results into a table.
-     * Shows hotel name, price, and source/vendor.
-     */
-    function displayHotels(data) {
-      const hotels = data.hotels || [];
-
-      if (hotels.length === 0) {
-        hotelsDiv.innerHTML =
-          '<div class="hotels-section">' +
-            '<h2>Hotels at Destination</h2>' +
-            '<p class="hotels-message">No hotel pricing found for this destination.</p>' +
-          '</div>';
-        return;
-      }
-
-      let html =
-        '<div class="hotels-section">' +
-          '<h2>Hotels at Destination</h2>' +
-          '<p style="font-size:0.85rem;color:#666;margin-bottom:10px;">' +
-            escapeHtml(data.city) + ' &middot; ' +
-            escapeHtml(data.checkin) + ' → ' + escapeHtml(data.checkout) +
-          '</p>' +
-          '<table class="hotels-table">' +
-            '<thead><tr><th>Hotel</th><th>Price</th><th>Source</th></tr></thead>' +
-            '<tbody>';
-
-      for (const h of hotels) {
-        html +=
-          '<tr>' +
-            '<td>' + escapeHtml(h.name) + '</td>' +
-            '<td>' + (h.price ? escapeHtml(h.price) : '—') + '</td>' +
-            '<td>' + (h.vendor ? escapeHtml(h.vendor) : '—') + '</td>' +
-          '</tr>';
-      }
-
-      html += '</tbody></table></div>';
-      hotelsDiv.innerHTML = html;
     }
 
     // =============================================

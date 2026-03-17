@@ -13,17 +13,16 @@
  * - By keeping the key on the server, only your backend can access it.
  * - The frontend never sees the key — it only talks to YOUR /api/flight endpoint.
  *
- * SETTING UP YOUR API KEYS IN VERCEL:
+ * SETTING UP YOUR API KEY IN VERCEL:
  * 1. Go to your Vercel project dashboard
  * 2. Navigate to Settings → Environment Variables
- * 3. Add these variables:
- *      Name:  FLIGHTAWARE_API_KEY       Value: your-aeroapi-key-here
- *      Name:  MAKCORPS_API_KEY          Value: your-makcorps-api-key-here
- * 4. Redeploy the project for the variables to take effect
+ * 3. Add a new variable:
+ *      Name:  FLIGHTAWARE_API_KEY
+ *      Value: your-aeroapi-key-here
+ * 4. Redeploy the project for the variable to take effect
  *
  * For local development, create a .env file in the project root:
  *      FLIGHTAWARE_API_KEY=your-aeroapi-key-here
- *      MAKCORPS_API_KEY=your-makcorps-api-key-here
  */
 
 module.exports = async function handler(req, res) {
