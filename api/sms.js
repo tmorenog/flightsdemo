@@ -7,8 +7,8 @@
  * this function:
  *   1. Parses the flight code from the message body
  *   2. Looks up the flight via FlightAware AeroAPI
- *   3. Formats the flight details as a plain-text reply
- *   4. Returns TwiML XML so Twilio sends the reply back via WhatsApp
+ *   3. Replies via WhatsApp with the flight details
+ *   4. Places an outbound voice call to the sender and reads the info aloud
  *
  * TWILIO WHATSAPP SANDBOX SETUP:
  * 1. Go to Twilio Console → Messaging → Try it out → Send a WhatsApp message
@@ -18,11 +18,11 @@
  *      https://your-vercel-domain.vercel.app/api/sms   (HTTP POST)
  * 4. Save. Now WhatsApp messages to the sandbox will hit this endpoint.
  *
- * NOTE: The WhatsApp Sandbox does NOT require A2P 10DLC campaign registration
- * or phone number verification, making it ideal for development and demos.
- *
  * ENVIRONMENT VARIABLES NEEDED:
  * - FLIGHTAWARE_API_KEY (same one used by /api/flight)
+ * - TWILIO_ACCOUNT_SID
+ * - TWILIO_AUTH_TOKEN
+ * - TWILIO_PHONE_NUMBER  (your Twilio phone number for outbound calls, e.g. +12295972468)
  */
 
 module.exports = async function handler(req, res) {
@@ -32,8 +32,10 @@ module.exports = async function handler(req, res) {
     return res.status(405).send(twiml("This endpoint only accepts POST requests from Twilio."));
   }
 
-  // Twilio sends the SMS text in the "Body" field (URL-encoded form data)
+  // Twilio sends the message text in the "Body" field (URL-encoded form data)
   const body = (req.body.Body || "").trim();
+  // "From" contains the sender — e.g. "whatsapp:+15551234567"
+  const from = (req.body.From || "").trim();
 
   if (!body) {
     return res
@@ -77,7 +79,10 @@ module.exports = async function handler(req, res) {
 
     // Use the most recent flight (last in the array)
     const f = data.flights[data.flights.length - 1];
-    const message = formatFlightSMS(f);
+    const message = formatFlightMessage(f);
+
+    // Place an outbound voice call to read the info aloud (fire-and-forget)
+    placeVoiceCall(from, formatFlightSpeech(f)).catch(() => {});
 
     res.setHeader("Content-Type", "text/xml");
     return res.status(200).send(twiml(message));
@@ -88,10 +93,51 @@ module.exports = async function handler(req, res) {
 };
 
 /**
- * Format flight data into a concise SMS-friendly string.
- * SMS has a 1600-char limit per segment, so keep it tight.
+ * Place an outbound Twilio voice call that reads flight info using <Say>.
+ * Uses the Twilio REST API directly (no SDK needed).
  */
-function formatFlightSMS(f) {
+async function placeVoiceCall(whatsappFrom, speechText) {
+  const accountSid = process.env.TWILIO_ACCOUNT_SID;
+  const authToken = process.env.TWILIO_AUTH_TOKEN;
+  const twilioPhone = process.env.TWILIO_PHONE_NUMBER;
+
+  if (!accountSid || !authToken || !twilioPhone) return;
+
+  // Strip "whatsapp:" prefix to get the raw phone number
+  const toNumber = whatsappFrom.replace(/^whatsapp:/, "");
+  if (!toNumber) return;
+
+  // Build TwiML for the voice call
+  const voiceTwiml = [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    "<Response>",
+    '  <Say voice="Polly.Joanna">' + escapeXml(speechText) + "</Say>",
+    "</Response>",
+  ].join("\n");
+
+  const params = new URLSearchParams({
+    To: toNumber,
+    From: twilioPhone,
+    Twiml: voiceTwiml,
+  });
+
+  const url = `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Calls.json`;
+  const credentials = Buffer.from(`${accountSid}:${authToken}`).toString("base64");
+
+  await fetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Basic ${credentials}`,
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: params.toString(),
+  });
+}
+
+/**
+ * Format flight data for the WhatsApp text reply.
+ */
+function formatFlightMessage(f) {
   const origin = formatAirport(f.origin);
   const dest = formatAirport(f.destination);
   const depDelay = delayMinutes(f.scheduled_out, f.actual_out);
@@ -113,6 +159,48 @@ function formatFlightSMS(f) {
   ];
 
   return lines.join("\n");
+}
+
+/**
+ * Format flight data as natural speech for the voice call.
+ */
+function formatFlightSpeech(f) {
+  const origin = speakAirport(f.origin);
+  const dest = speakAirport(f.destination);
+  const depDelay = delayMinutes(f.scheduled_out, f.actual_out);
+  const arrDelay = delayMinutes(f.scheduled_in, f.actual_in);
+
+  const parts = [
+    `Here is the flight information for ${f.ident || "your flight"}.`,
+    `Status: ${f.status || "unknown"}.`,
+    `Departing from ${origin}, arriving at ${dest}.`,
+  ];
+
+  if (depDelay !== null) {
+    parts.push(
+      depDelay <= 0
+        ? "The departure was on time."
+        : `The departure was delayed by ${depDelay} minutes.`
+    );
+  }
+
+  if (arrDelay !== null) {
+    parts.push(
+      arrDelay <= 0
+        ? "The arrival was on time."
+        : `The arrival was delayed by ${arrDelay} minutes.`
+    );
+  }
+
+  return parts.join(" ");
+}
+
+function speakAirport(airport) {
+  if (!airport) return "an unknown airport";
+  const name = airport.name || "";
+  const code = airport.code_iata || airport.code || "";
+  if (name && code) return `${name} (${code})`;
+  return name || code || "an unknown airport";
 }
 
 function formatAirport(airport) {
@@ -145,21 +233,21 @@ function fmtDelay(minutes) {
   return `+${minutes} min late`;
 }
 
-/**
- * Wrap a message string in TwiML XML so Twilio sends it as a WhatsApp reply.
- * We build the XML by hand to avoid needing any dependencies.
- */
-function twiml(message) {
-  // Escape XML special characters in the message
-  const escaped = message
+function escapeXml(str) {
+  return str
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;");
+}
 
+/**
+ * Wrap a message string in TwiML XML so Twilio sends it as a WhatsApp reply.
+ */
+function twiml(message) {
   return [
     '<?xml version="1.0" encoding="UTF-8"?>',
     "<Response>",
-    "  <Message>" + escaped + "</Message>",
+    "  <Message>" + escapeXml(message) + "</Message>",
     "</Response>",
   ].join("\n");
 }
