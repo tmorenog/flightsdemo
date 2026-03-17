@@ -1,28 +1,25 @@
 /**
  * Serverless API route: POST /api/sms
  *
- * TWILIO WHATSAPP SANDBOX WEBHOOK
- * This endpoint receives incoming WhatsApp messages via the Twilio Sandbox.
- * When a user sends a flight code (e.g. "AAL100") to the sandbox number,
- * this function:
- *   1. Parses the flight code from the message body
+ * TWILIO SMS WEBHOOK
+ * This endpoint receives incoming SMS messages on +1 (229) 597-2468.
+ * When a user texts a flight code (e.g. "AAL100"), this function:
+ *   1. Parses the flight code from the SMS body
  *   2. Looks up the flight via FlightAware AeroAPI
- *   3. Replies via WhatsApp with the flight details
+ *   3. Replies via SMS with the flight details
  *   4. Places an outbound voice call to the sender and reads the info aloud
  *
- * TWILIO WHATSAPP SANDBOX SETUP:
- * 1. Go to Twilio Console → Messaging → Try it out → Send a WhatsApp message
- * 2. Follow the instructions to join your sandbox (send "join <your-keyword>"
- *    to the sandbox number, typically +1 (415) 523-8886)
- * 3. Under "Sandbox settings", set "WHEN A MESSAGE COMES IN" webhook to:
+ * TWILIO SETUP:
+ * 1. Go to Twilio Console → Phone Numbers → +12295972468
+ * 2. Under "Messaging", set the webhook for "A message comes in" to:
  *      https://your-vercel-domain.vercel.app/api/sms   (HTTP POST)
- * 4. Save. Now WhatsApp messages to the sandbox will hit this endpoint.
+ * 3. Save. Now incoming texts will hit this endpoint.
  *
  * ENVIRONMENT VARIABLES NEEDED:
  * - FLIGHTAWARE_API_KEY (same one used by /api/flight)
  * - TWILIO_ACCOUNT_SID
  * - TWILIO_AUTH_TOKEN
- * - TWILIO_PHONE_NUMBER  (your Twilio phone number for outbound calls, e.g. +12295972468)
+ * - TWILIO_PHONE_NUMBER  (your Twilio number for outbound calls: +12295972468)
  */
 
 module.exports = async function handler(req, res) {
@@ -34,7 +31,7 @@ module.exports = async function handler(req, res) {
 
   // Twilio sends the message text in the "Body" field (URL-encoded form data)
   const body = (req.body.Body || "").trim();
-  // "From" contains the sender — e.g. "whatsapp:+15551234567"
+  // "From" contains the sender's phone number, e.g. "+15551234567"
   const from = (req.body.From || "").trim();
 
   if (!body) {
@@ -96,16 +93,12 @@ module.exports = async function handler(req, res) {
  * Place an outbound Twilio voice call that reads flight info using <Say>.
  * Uses the Twilio REST API directly (no SDK needed).
  */
-async function placeVoiceCall(whatsappFrom, speechText) {
+async function placeVoiceCall(fromNumber, speechText) {
   const accountSid = process.env.TWILIO_ACCOUNT_SID;
   const authToken = process.env.TWILIO_AUTH_TOKEN;
   const twilioPhone = process.env.TWILIO_PHONE_NUMBER;
 
-  if (!accountSid || !authToken || !twilioPhone) return;
-
-  // Strip "whatsapp:" prefix to get the raw phone number
-  const toNumber = whatsappFrom.replace(/^whatsapp:/, "");
-  if (!toNumber) return;
+  if (!accountSid || !authToken || !twilioPhone || !fromNumber) return;
 
   // Build TwiML for the voice call
   const voiceTwiml = [
@@ -116,7 +109,7 @@ async function placeVoiceCall(whatsappFrom, speechText) {
   ].join("\n");
 
   const params = new URLSearchParams({
-    To: toNumber,
+    To: fromNumber,
     From: twilioPhone,
     Twiml: voiceTwiml,
   });
@@ -135,7 +128,7 @@ async function placeVoiceCall(whatsappFrom, speechText) {
 }
 
 /**
- * Format flight data for the WhatsApp text reply.
+ * Format flight data for the SMS text reply.
  */
 function formatFlightMessage(f) {
   const origin = formatAirport(f.origin);
@@ -241,7 +234,7 @@ function escapeXml(str) {
 }
 
 /**
- * Wrap a message string in TwiML XML so Twilio sends it as a WhatsApp reply.
+ * Wrap a message string in TwiML XML so Twilio sends it as an SMS reply.
  */
 function twiml(message) {
   return [
