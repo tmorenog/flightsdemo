@@ -24,9 +24,34 @@
 
 const fs = require("fs");
 const path = require("path");
+const querystring = require("querystring");
 
 const EVENTS_FILE = path.join("/tmp", "flight-events.json");
 const MAX_EVENTS = 50;
+
+/**
+ * Read and parse the raw request body.
+ * Vercel serverless functions do not auto-parse application/x-www-form-urlencoded,
+ * so we must collect the stream manually.
+ */
+function parseBody(req) {
+  return new Promise((resolve, reject) => {
+    // If Vercel already parsed it (some runtimes do), use it directly
+    if (req.body && typeof req.body === "object" && Object.keys(req.body).length > 0) {
+      return resolve(req.body);
+    }
+    let raw = "";
+    req.on("data", (chunk) => { raw += chunk; });
+    req.on("end", () => {
+      try {
+        resolve(querystring.parse(raw));
+      } catch {
+        resolve({});
+      }
+    });
+    req.on("error", reject);
+  });
+}
 
 /** Append an event to the /tmp events file so the frontend can poll it. */
 function storeEvent(event) {
@@ -48,10 +73,11 @@ module.exports = async function handler(req, res) {
     return res.status(405).send(twiml("This endpoint only accepts POST requests from Twilio."));
   }
 
-  // Twilio sends the message text in the "Body" field (URL-encoded form data)
-  const body = (req.body.Body || "").trim();
+  // Parse the form-encoded body that Twilio sends
+  const fields = await parseBody(req);
+  const body = (fields.Body || "").trim();
   // "From" contains the sender's phone number, e.g. "+15551234567"
-  const from = (req.body.From || "").trim();
+  const from = (fields.From || "").trim();
 
   if (!body) {
     return res
