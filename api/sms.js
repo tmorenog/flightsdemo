@@ -22,6 +22,25 @@
  * - TWILIO_PHONE_NUMBER  (your Twilio number for outbound calls: +12295972468)
  */
 
+const fs = require("fs");
+const path = require("path");
+
+const EVENTS_FILE = path.join("/tmp", "flight-events.json");
+const MAX_EVENTS = 50;
+
+/** Append an event to the /tmp events file so the frontend can poll it. */
+function storeEvent(event) {
+  let events = [];
+  try {
+    events = JSON.parse(fs.readFileSync(EVENTS_FILE, "utf-8"));
+  } catch {
+    // file doesn't exist yet
+  }
+  events.push(event);
+  if (events.length > MAX_EVENTS) events = events.slice(-MAX_EVENTS);
+  fs.writeFileSync(EVENTS_FILE, JSON.stringify(events));
+}
+
 module.exports = async function handler(req, res) {
   // Twilio sends webhooks as POST requests
   if (req.method !== "POST") {
@@ -78,7 +97,29 @@ module.exports = async function handler(req, res) {
     const f = data.flights[data.flights.length - 1];
     const message = formatFlightMessage(f);
 
-    // Place an outbound voice call to read the info aloud (fire-and-forget)
+    // Store "received" event for the frontend live feed
+    storeEvent({
+      type: "sms_received",
+      timestamp: new Date().toISOString(),
+      from,
+      ident,
+      flight: {
+        ident: f.ident,
+        status: f.status,
+        origin: formatAirport(f.origin),
+        destination: formatAirport(f.destination),
+        depDelay: delayMinutes(f.scheduled_out, f.actual_out),
+        arrDelay: delayMinutes(f.scheduled_in, f.actual_in),
+      },
+    });
+
+    // Place an outbound voice call to read the info aloud
+    storeEvent({
+      type: "calling",
+      timestamp: new Date().toISOString(),
+      from,
+      ident,
+    });
     placeVoiceCall(from, formatFlightSpeech(f)).catch(() => {});
 
     res.setHeader("Content-Type", "text/xml");

@@ -95,6 +95,104 @@
 
     .delay-positive { color: #c62828; font-weight: 600; }
     .delay-zero     { color: #2e7d32; font-weight: 600; }
+
+    /* Live SMS feed */
+    .live-feed {
+      margin-top: 40px;
+      border-top: 2px solid #e0e0e0;
+      padding-top: 20px;
+    }
+
+    .live-feed h2 {
+      font-size: 1.1rem;
+      margin-bottom: 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .pulse {
+      width: 10px;
+      height: 10px;
+      background: #4caf50;
+      border-radius: 50%;
+      animation: pulse-anim 1.5s infinite;
+    }
+
+    @keyframes pulse-anim {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.3; }
+    }
+
+    .feed-empty {
+      color: #999;
+      font-size: 0.9rem;
+      font-style: italic;
+    }
+
+    .feed-event {
+      background: #fff;
+      border: 1px solid #e0e0e0;
+      border-radius: 8px;
+      padding: 14px;
+      margin-bottom: 10px;
+      animation: slide-in 0.3s ease-out;
+    }
+
+    @keyframes slide-in {
+      from { opacity: 0; transform: translateY(-8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .feed-event .feed-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 8px;
+    }
+
+    .feed-event .feed-tag {
+      font-size: 0.75rem;
+      font-weight: 600;
+      padding: 2px 8px;
+      border-radius: 4px;
+      text-transform: uppercase;
+    }
+
+    .feed-tag.received {
+      background: #e3f2fd;
+      color: #0d47a1;
+    }
+
+    .feed-tag.calling {
+      background: #fff3e0;
+      color: #e65100;
+    }
+
+    .feed-event .feed-from {
+      font-size: 0.85rem;
+      color: #666;
+    }
+
+    .feed-event .feed-time {
+      font-size: 0.8rem;
+      color: #999;
+    }
+
+    .feed-flight-info {
+      font-size: 0.9rem;
+      margin-top: 6px;
+    }
+
+    .feed-flight-info .feed-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 2px 0;
+    }
+
+    .feed-flight-info .feed-label {
+      color: #666;
+    }
   </style>
 </head>
 <body>
@@ -111,6 +209,12 @@
 
   <!-- Results will be injected here by JavaScript -->
   <div id="results"></div>
+
+  <!-- Live SMS feed -->
+  <div class="live-feed">
+    <h2><span class="pulse"></span> Live SMS Feed</h2>
+    <div id="feedList"><p class="feed-empty">Waiting for incoming texts...</p></div>
+  </div>
 
   <script>
     /**
@@ -263,6 +367,82 @@
       div.textContent = String(str);
       return div.innerHTML;
     }
+
+    // =============================================
+    //  LIVE SMS FEED — polls /api/events every 3s
+    // =============================================
+    const feedList = document.getElementById("feedList");
+    let lastEventTime = null;
+    let feedStarted = false;
+
+    async function pollEvents() {
+      try {
+        let url = "/api/events";
+        if (lastEventTime) url += "?since=" + encodeURIComponent(lastEventTime);
+        const res = await fetch(url);
+        const data = await res.json();
+        if (data.events && data.events.length > 0) {
+          if (!feedStarted) {
+            feedList.innerHTML = "";
+            feedStarted = true;
+          }
+          for (const evt of data.events) {
+            feedList.insertBefore(renderEvent(evt), feedList.firstChild);
+            lastEventTime = evt.timestamp;
+          }
+        }
+      } catch {
+        // Silently ignore polling errors
+      }
+    }
+
+    function renderEvent(evt) {
+      const div = document.createElement("div");
+      div.className = "feed-event";
+
+      const time = new Date(evt.timestamp).toLocaleTimeString();
+
+      if (evt.type === "sms_received") {
+        const f = evt.flight || {};
+        const depDelay = f.depDelay;
+        const arrDelay = f.arrDelay;
+        div.innerHTML =
+          '<div class="feed-header">' +
+            '<span><span class="feed-tag received">SMS Received</span> ' +
+            '<span class="feed-from">from ' + escapeHtml(evt.from) + '</span></span>' +
+            '<span class="feed-time">' + escapeHtml(time) + '</span>' +
+          '</div>' +
+          '<div class="feed-flight-info">' +
+            '<div class="feed-row"><span class="feed-label">Flight</span><span>' + escapeHtml(f.ident || evt.ident) + '</span></div>' +
+            '<div class="feed-row"><span class="feed-label">Status</span><span>' + escapeHtml(f.status || "—") + '</span></div>' +
+            '<div class="feed-row"><span class="feed-label">Route</span><span>' + escapeHtml(f.origin || "—") + ' → ' + escapeHtml(f.destination || "—") + '</span></div>' +
+            '<div class="feed-row"><span class="feed-label">Dep delay</span><span>' + formatFeedDelay(depDelay) + '</span></div>' +
+            '<div class="feed-row"><span class="feed-label">Arr delay</span><span>' + formatFeedDelay(arrDelay) + '</span></div>' +
+          '</div>';
+      } else if (evt.type === "calling") {
+        div.innerHTML =
+          '<div class="feed-header">' +
+            '<span><span class="feed-tag calling">Calling User</span> ' +
+            '<span class="feed-from">' + escapeHtml(evt.from) + '</span></span>' +
+            '<span class="feed-time">' + escapeHtml(time) + '</span>' +
+          '</div>' +
+          '<div class="feed-flight-info">' +
+            '<div class="feed-row"><span class="feed-label">Reading flight info for</span><span>' + escapeHtml(evt.ident) + '</span></div>' +
+          '</div>';
+      }
+
+      return div;
+    }
+
+    function formatFeedDelay(minutes) {
+      if (minutes === null || minutes === undefined) return "—";
+      if (minutes <= 0) return '<span class="delay-zero">On time</span>';
+      return '<span class="delay-positive">+' + minutes + ' min</span>';
+    }
+
+    // Poll every 3 seconds
+    setInterval(pollEvents, 3000);
+    pollEvents();
   </script>
 
 </body>
