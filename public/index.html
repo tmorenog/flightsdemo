@@ -3,6 +3,9 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <!-- Leaflet: open-source map library loaded from CDN (no build tools needed) -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <title>Flight Operations Tracker</title>
   <style>
     /* Simple, clean layout — no frameworks needed */
@@ -10,7 +13,7 @@
 
     body {
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      max-width: 700px;
+      max-width: 900px;
       margin: 40px auto;
       padding: 0 20px;
       color: #222;
@@ -21,6 +24,11 @@
       text-align: center;
       margin-bottom: 8px;
       font-size: 1.6rem;
+    }
+
+    h2 {
+      font-size: 1.3rem;
+      margin-bottom: 8px;
     }
 
     .subtitle {
@@ -53,6 +61,7 @@
       border: none;
       border-radius: 6px;
       cursor: pointer;
+      white-space: nowrap;
     }
 
     .search-form button:hover { background: #004494; }
@@ -73,7 +82,6 @@
     th {
       background: #f0f0f0;
       font-weight: 600;
-      width: 45%;
     }
 
     /* Status / error messages */
@@ -95,10 +103,32 @@
 
     .delay-positive { color: #c62828; font-weight: 600; }
     .delay-zero     { color: #2e7d32; font-weight: 600; }
+
+    /* Section divider */
+    .section-divider {
+      border: none;
+      border-top: 1px solid #e0e0e0;
+      margin: 40px 0;
+    }
+
+    /* Map container */
+    #map {
+      width: 100%;
+      height: 500px;
+      border-radius: 6px;
+      border: 1px solid #ccc;
+      margin-top: 16px;
+      /* Hidden until the user initiates a search */
+      display: none;
+    }
   </style>
 </head>
 <body>
 
+  <!-- ============================================================
+       SECTION 1: FLIGHT SEARCH
+       The user enters a flight number and sees operational details.
+       ============================================================ -->
   <h1>Flight Operations Tracker</h1>
   <p class="subtitle">Enter a flight number to view operational details and delay information.</p>
 
@@ -111,36 +141,64 @@
   <!-- Results will be injected here by JavaScript -->
   <div id="results"></div>
 
+  <!-- ============================================================
+       SECTION 2: AIRPORT INBOUND MAP
+       The user enters an airport code and sees flights currently
+       en route to that airport plotted on an interactive map.
+       ============================================================ -->
+  <hr class="section-divider" />
+
+  <h2>Flights Flying Toward an Airport</h2>
+  <p class="subtitle">Enter an airport code to see inbound flights on a map.</p>
+
+  <div class="search-form">
+    <input type="text" id="airportInput" placeholder="e.g. BOS, JFK, LAX" value="BOS" />
+    <button id="inboundBtn">Show inbound flights on map</button>
+  </div>
+
+  <div id="map"></div>
+  <div id="inbound-results"></div>
+
   <script>
     /**
      * ==========================================================
      *  HOW THE FRONTEND CALLS THE BACKEND
      * ==========================================================
-     *  1. The user types a flight number and clicks "Search".
-     *  2. JavaScript sends a GET request to /api/flight?ident=FLIGHTNUMBER
-     *     — This is OUR backend, not the AeroAPI directly.
-     *  3. The backend calls the AeroAPI (with the secret key) and
-     *     returns the JSON result to us.
-     *  4. We parse and display the data in a table.
+     *  This app has TWO backend routes:
      *
-     *  The frontend NEVER contacts FlightAware directly and
-     *  NEVER sees the API key. This is the secure pattern for
-     *  calling third-party APIs from a web application.
+     *  1. /api/flight?ident=AAL100
+     *     → Returns operational data for a specific flight
+     *
+     *  2. /api/inbound?airport=BOS
+     *     → Returns flights currently en route to an airport
+     *       (with latitude/longitude for map plotting)
+     *
+     *  In both cases, the frontend calls OUR backend — never the
+     *  FlightAware AeroAPI directly. The backend holds the secret
+     *  API key and proxies the requests securely.
+     *
+     *  WHY THE API KEY MUST STAY ON THE SERVER:
+     *  If the key were in this JavaScript file, anyone could open
+     *  View Source or DevTools and steal it. By keeping it in an
+     *  environment variable on the server, only our backend can
+     *  use it.
      * ==========================================================
      */
 
-    const input = document.getElementById("flightInput");
-    const btn   = document.getElementById("searchBtn");
-    const resultsDiv = document.getElementById("results");
+    // ===================== SECTION 1: FLIGHT SEARCH =====================
+
+    const flightInput = document.getElementById("flightInput");
+    const searchBtn   = document.getElementById("searchBtn");
+    const resultsDiv  = document.getElementById("results");
 
     // Allow pressing Enter to search
-    input.addEventListener("keydown", (e) => {
+    flightInput.addEventListener("keydown", (e) => {
       if (e.key === "Enter") searchFlight();
     });
-    btn.addEventListener("click", searchFlight);
+    searchBtn.addEventListener("click", searchFlight);
 
     async function searchFlight() {
-      const ident = input.value.trim();
+      const ident = flightInput.value.trim();
       if (!ident) return;
 
       // Show loading state
@@ -212,7 +270,150 @@
       resultsDiv.innerHTML = html;
     }
 
-    // --- Helper functions ---
+    // ===================== SECTION 2: AIRPORT INBOUND MAP =====================
+
+    const airportInput     = document.getElementById("airportInput");
+    const inboundBtn       = document.getElementById("inboundBtn");
+    const inboundResultsDiv = document.getElementById("inbound-results");
+    const mapDiv           = document.getElementById("map");
+
+    let map = null;      // Leaflet map instance — lazy-initialized on first use
+    let markers = [];    // Track markers so we can clear them between searches
+
+    inboundBtn.addEventListener("click", searchInbound);
+    airportInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") searchInbound();
+    });
+
+    /**
+     * Fetch inbound flights for the given airport and display them.
+     */
+    async function searchInbound() {
+      const airport = airportInput.value.trim().toUpperCase();
+      if (!airport) return;
+
+      inboundResultsDiv.innerHTML = '<div class="message loading">Fetching inbound flights…</div>';
+
+      try {
+        // --- Call OUR backend, which proxies to the AeroAPI ---
+        const res = await fetch("/api/inbound?airport=" + encodeURIComponent(airport));
+        const data = await res.json();
+
+        if (!res.ok) {
+          inboundResultsDiv.innerHTML =
+            '<div class="message error">Error: ' + escapeHtml(data.error || "Unknown error") + "</div>";
+          return;
+        }
+
+        const flights = data.flights || [];
+        if (flights.length === 0) {
+          inboundResultsDiv.innerHTML =
+            '<div class="message error">No en-route inbound flights found for ' + escapeHtml(airport) + ".</div>";
+          clearMapMarkers();
+          return;
+        }
+
+        // Show the map and plot flights on it
+        plotFlightsOnMap(flights);
+        // Show the same data in a table below the map
+        displayInboundTable(flights);
+      } catch (err) {
+        inboundResultsDiv.innerHTML =
+          '<div class="message error">Network error: ' + escapeHtml(err.message) + "</div>";
+      }
+    }
+
+    /**
+     * ==========================================================
+     *  HOW THE MAP IS POPULATED WITH FLIGHT POSITIONS
+     * ==========================================================
+     *  1. The backend calls AeroAPI's airport arrivals endpoint.
+     *  2. AeroAPI returns each flight with a "last_position" object
+     *     containing latitude, longitude, altitude, and groundspeed.
+     *  3. The backend filters for flights that are still en route
+     *     (have valid coordinates and haven't arrived yet) and
+     *     returns simplified objects to the frontend.
+     *  4. This function creates a Leaflet marker for each flight
+     *     at its lat/lon position and adds a popup with details.
+     *  5. The map auto-zooms to fit all markers using fitBounds().
+     * ==========================================================
+     */
+    function plotFlightsOnMap(flights) {
+      // Show the map container (hidden by default via CSS)
+      mapDiv.style.display = "block";
+
+      // Lazy-initialize the Leaflet map on first use
+      if (!map) {
+        map = L.map("map").setView([39.8, -98.6], 4); // center of US
+        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+          attribution: "&copy; OpenStreetMap contributors",
+          maxZoom: 18,
+        }).addTo(map);
+      }
+
+      // Clear any markers from a previous search
+      clearMapMarkers();
+
+      // Add a marker for each en-route flight
+      const bounds = L.latLngBounds();
+
+      flights.forEach((f) => {
+        const marker = L.marker([f.latitude, f.longitude]).addTo(map);
+
+        // Popup content shown when the user clicks a marker
+        marker.bindPopup(
+          "<b>" + escapeHtml(f.ident) + "</b><br>" +
+          "From: " + escapeHtml(f.origin) + "<br>" +
+          "To: " + escapeHtml(f.destination) + "<br>" +
+          "Status: " + escapeHtml(f.status) + "<br>" +
+          "Altitude: " + (f.altitude != null ? escapeHtml(String(f.altitude)) + " ft" : "—") + "<br>" +
+          "Groundspeed: " + (f.groundspeed != null ? escapeHtml(String(f.groundspeed)) + " kts" : "—")
+        );
+
+        markers.push(marker);
+        bounds.extend([f.latitude, f.longitude]);
+      });
+
+      // Auto-zoom to fit all markers with some padding
+      if (bounds.isValid()) {
+        map.fitBounds(bounds, { padding: [30, 30] });
+      }
+    }
+
+    /**
+     * Remove all flight markers from the map.
+     */
+    function clearMapMarkers() {
+      markers.forEach((m) => { if (map) map.removeLayer(m); });
+      markers = [];
+    }
+
+    /**
+     * Display inbound flights in a summary table below the map.
+     */
+    function displayInboundTable(flights) {
+      let html =
+        "<table><thead><tr>" +
+        "<th>Flight</th><th>From</th><th>To</th><th>Status</th><th>Alt (ft)</th><th>Speed (kts)</th>" +
+        "</tr></thead><tbody>";
+
+      flights.forEach((f) => {
+        html +=
+          "<tr>" +
+          "<td>" + escapeHtml(f.ident) + "</td>" +
+          "<td>" + escapeHtml(f.origin) + "</td>" +
+          "<td>" + escapeHtml(f.destination) + "</td>" +
+          "<td>" + escapeHtml(f.status) + "</td>" +
+          "<td>" + (f.altitude != null ? escapeHtml(String(f.altitude)) : "—") + "</td>" +
+          "<td>" + (f.groundspeed != null ? escapeHtml(String(f.groundspeed)) : "—") + "</td>" +
+          "</tr>";
+      });
+
+      html += "</tbody></table>";
+      inboundResultsDiv.innerHTML = html;
+    }
+
+    // ===================== SHARED HELPER FUNCTIONS =====================
 
     /**
      * Compute delay in minutes between two ISO-8601 timestamps.
