@@ -129,8 +129,10 @@ module.exports = async function handler(req, res) {
         .send(twiml(`No flights found for "${ident}".`));
     }
 
-    // Use the most recent flight (last in the array)
-    const f = data.flights[data.flights.length - 1];
+    // Pick the flight with the most recent scheduled departure
+    const f = data.flights.reduce((latest, fl) =>
+      (fl.scheduled_out || "") > (latest.scheduled_out || "") ? fl : latest
+    );
     const message = formatFlightMessage(f);
 
     // Store "received" event for the frontend live feed

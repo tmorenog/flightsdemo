@@ -269,8 +269,10 @@
           return;
         }
 
-        // Show the most recent flight (last element in the array)
-        const flight = data.flights[data.flights.length - 1];
+        // Pick the flight with the most recent scheduled departure
+        const flight = data.flights.reduce((latest, f) =>
+          (f.scheduled_out || "") > (latest.scheduled_out || "") ? f : latest
+        );
         displayFlight(flight);
       } catch (err) {
         resultsDiv.innerHTML =
