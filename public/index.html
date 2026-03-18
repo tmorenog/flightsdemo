@@ -269,11 +269,10 @@
           return;
         }
 
-        // Sort by scheduled departure (most recent first) and show up to 5
+        // Sort by scheduled departure and show the most recent one
         const flights = [...data.flights]
-          .sort((a, b) => (b.scheduled_out || "").localeCompare(a.scheduled_out || ""))
-          .slice(0, 5);
-        displayFlights(flights);
+          .sort((a, b) => (b.scheduled_out || "").localeCompare(a.scheduled_out || ""));
+        displayFlights([flights[0]]);
       } catch (err) {
         resultsDiv.innerHTML =
           '<div class="message error">Network error: ' + escapeHtml(err.message) + "</div>";
