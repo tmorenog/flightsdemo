@@ -332,10 +332,10 @@
     /**
      * Format a delay value for display, with color coding.
      */
-    function formatDelay(minutes) {
-      if (minutes === null) return "—";
+    function formatDelay(minutes, short) {
+      if (minutes == null) return "—";
       if (minutes <= 0) {
-        return '<span class="delay-zero">' + minutes + " min (on time)</span>";
+        return '<span class="delay-zero">' + (short ? "On time" : minutes + " min (on time)") + "</span>";
       }
       return '<span class="delay-positive">+' + minutes + " min</span>";
     }
@@ -390,6 +390,10 @@
             feedList.insertBefore(renderEvent(evt), feedList.firstChild);
             lastEventTime = evt.timestamp;
           }
+          // Cap the feed to 50 items to prevent unbounded DOM growth
+          while (feedList.children.length > 50) {
+            feedList.removeChild(feedList.lastChild);
+          }
         }
       } catch {
         // Silently ignore polling errors
@@ -416,8 +420,8 @@
             '<div class="feed-row"><span class="feed-label">Flight</span><span>' + escapeHtml(f.ident || evt.ident) + '</span></div>' +
             '<div class="feed-row"><span class="feed-label">Status</span><span>' + escapeHtml(f.status || "—") + '</span></div>' +
             '<div class="feed-row"><span class="feed-label">Route</span><span>' + escapeHtml(f.origin || "—") + ' → ' + escapeHtml(f.destination || "—") + '</span></div>' +
-            '<div class="feed-row"><span class="feed-label">Dep delay</span><span>' + formatFeedDelay(depDelay) + '</span></div>' +
-            '<div class="feed-row"><span class="feed-label">Arr delay</span><span>' + formatFeedDelay(arrDelay) + '</span></div>' +
+            '<div class="feed-row"><span class="feed-label">Dep delay</span><span>' + formatDelay(depDelay, true) + '</span></div>' +
+            '<div class="feed-row"><span class="feed-label">Arr delay</span><span>' + formatDelay(arrDelay, true) + '</span></div>' +
           '</div>';
       } else if (evt.type === "calling") {
         div.innerHTML =
@@ -432,12 +436,6 @@
       }
 
       return div;
-    }
-
-    function formatFeedDelay(minutes) {
-      if (minutes === null || minutes === undefined) return "—";
-      if (minutes <= 0) return '<span class="delay-zero">On time</span>';
-      return '<span class="delay-positive">+' + minutes + ' min</span>';
     }
 
     // Poll every 3 seconds
