@@ -269,11 +269,11 @@
           return;
         }
 
-        // Pick the flight with the most recent scheduled departure
-        const flight = data.flights.reduce((latest, f) =>
-          (f.scheduled_out || "") > (latest.scheduled_out || "") ? f : latest
-        );
-        displayFlight(flight);
+        // Sort by scheduled departure (most recent first) and show up to 5
+        const flights = [...data.flights]
+          .sort((a, b) => (b.scheduled_out || "").localeCompare(a.scheduled_out || ""))
+          .slice(0, 5);
+        displayFlights(flights);
       } catch (err) {
         resultsDiv.innerHTML =
           '<div class="message error">Network error: ' + escapeHtml(err.message) + "</div>";
@@ -281,41 +281,33 @@
     }
 
     /**
-     * Display a single flight record in a table.
+     * Display up to 5 recent flights, each in its own table.
      */
-    function displayFlight(f) {
-      // -------------------------------------------------------
-      //  COMPUTING DELAYS
-      //  We subtract the scheduled timestamp from the actual
-      //  timestamp to find how many minutes late the flight was.
-      //  A positive number means a delay; zero or negative means
-      //  the flight was on time or early.
-      // -------------------------------------------------------
-      const depDelay = computeDelayMinutes(f.scheduled_out, f.actual_out);
-      const arrDelay = computeDelayMinutes(f.scheduled_in, f.actual_in);
+    function displayFlights(flights) {
+      let html = "";
+      for (const f of flights) {
+        const depDelay = computeDelayMinutes(f.scheduled_out, f.actual_out);
+        const arrDelay = computeDelayMinutes(f.scheduled_in, f.actual_in);
 
-      const rows = [
-        ["Airline / Flight", f.ident || "—"],
-        ["Origin", formatAirport(f.origin)],
-        ["Destination", formatAirport(f.destination)],
-        ["Status", f.status || "—"],
-        ["Scheduled departure", formatTime(f.scheduled_out)],
-        ["Actual departure", formatTime(f.actual_out)],
-        ["Departure delay", formatDelay(depDelay)],
-        ["Scheduled arrival", formatTime(f.scheduled_in)],
-        ["Actual arrival", formatTime(f.actual_in)],
-        ["Arrival delay", formatDelay(arrDelay)],
-        ["Inbound flight", f.inbound_fa_flight_id
-            ? escapeHtml(f.inbound_fa_flight_id)
-            : '<span style="color:#999">None / not available</span>'],
-      ];
+        const rows = [
+          ["Airline / Flight", f.ident || "—"],
+          ["Origin", formatAirport(f.origin)],
+          ["Destination", formatAirport(f.destination)],
+          ["Status", f.status || "—"],
+          ["Scheduled departure", formatTime(f.scheduled_out)],
+          ["Actual departure", formatTime(f.actual_out)],
+          ["Departure delay", formatDelay(depDelay)],
+          ["Scheduled arrival", formatTime(f.scheduled_in)],
+          ["Actual arrival", formatTime(f.actual_in)],
+          ["Arrival delay", formatDelay(arrDelay)],
+        ];
 
-      let html = "<table><tbody>";
-      for (const [label, value] of rows) {
-        html += "<tr><th>" + escapeHtml(label) + "</th><td>" + value + "</td></tr>";
+        html += '<table style="margin-bottom:24px"><tbody>';
+        for (const [label, value] of rows) {
+          html += "<tr><th>" + escapeHtml(label) + "</th><td>" + value + "</td></tr>";
+        }
+        html += "</tbody></table>";
       }
-      html += "</tbody></table>";
-
       resultsDiv.innerHTML = html;
     }
 
